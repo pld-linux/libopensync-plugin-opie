@@ -1,0 +1,1125 @@
+--- libopensync-plugin-opie-0.38/src/opie_format.h.orig	2008-11-10 16:33:42.000000000 +0100
++++ libopensync-plugin-opie-0.38/src/opie_format.h	2025-09-05 18:27:37.575477789 +0200
+@@ -28,15 +28,15 @@ CONNECTION WITH THE SOFTWARE OR THE USE
+ void xmlfield_key_to_attr(OSyncXMLField *xmlfield, const char *key, xmlNode *node_to, const char *attrname);
+ void xmlfield_uid_to_attr(OSyncXMLField *xmlfield, xmlNode *node_to);
+ void xml_uid_attr_to_xmlfield(const char *uid, const char *nodename, OSyncXMLFormat *out_xmlformat, OSyncError **error);
+-time_t xmlfield_vtime_to_attr_time_t(OSyncXMLField *xmlfield, xmlNode *node_to, const char *attrname);
++time_t xmlfield_vtime_to_attr_time_t(OSyncXMLField *xmlfield, xmlNode *node_to, const char *attrname, OSyncError **error);
+ OSyncXMLField *xml_attrs_to_xmlfield_keys(xmlNode *node, OSyncXMLFormat *out_xmlformat, const char *fieldname, GSList *attrs, GSList *keys, OSyncError **error);
+ void dual_list_append(GSList **list1, void *item1, GSList **list2, void *item2);
+ void dual_list_clear(GSList **list1, GSList **list2);
+ void xmlfield_categories_to_attr(OSyncXMLField *in_xmlfield, xmlNode *node_to, const char *category_attr);
+ void xml_recur_attr_to_xmlfield(xmlNode *item_node, OSyncXMLFormat *out_xmlformat, GDate *startdate, OSyncError **error);
+-void xmlfield_recur_to_attr(OSyncXMLField *in_xmlfield, xmlNode *node_to);
++void xmlfield_recur_to_attr(OSyncXMLField *in_xmlfield, xmlNode *node_to, OSyncError **error);
+ void xml_todo_alarm_attr_to_xmlfield(const char *alarmstr, OSyncXMLFormat *out_xmlformat, time_t *starttime, OSyncError **error);
+-void xmlformat_todo_alarms_to_attr(OSyncXMLFormat *in_xmlformat, xmlNode *node_to, const char *duedate);
++void xmlformat_todo_alarms_to_attr(OSyncXMLFormat *in_xmlformat, xmlNode *node_to, const char *duedate, OSyncError **error);
+ void xmlformat_cal_alarms_to_attr(OSyncXMLFormat *in_xmlformat, xmlNode *node_to, time_t *starttime);
+ 
+ #endif /* _OPIE_FORMAT_H */
+--- libopensync-plugin-opie-0.38/src/opie_format.c.orig	2008-11-10 16:33:42.000000000 +0100
++++ libopensync-plugin-opie-0.38/src/opie_format.c	2025-09-05 22:03:42.415241228 +0200
+@@ -31,7 +31,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE
+ #include <opensync/opensync.h>
+ #include <opensync/opensync-time.h>
+ #include <opensync/opensync-format.h>
+-#include <opensync/opensync-merger.h>
++#include <opensync/opensync-capabilities.h>
+ #include <opensync/opensync-xmlformat.h>
+ 
+ enum OpieTodoState {
+@@ -45,7 +45,7 @@ enum OpieTodoState {
+ /** Convert Opie XML contact to OpenSync XML contact 
+  * 
+  **/
+-static osync_bool conv_opie_xml_contact_to_xml_contact(char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, OSyncError **error)
++static osync_bool conv_opie_xml_contact_to_xml_contact(char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, void *userdata, OSyncError **error)
+ {
+ 	osync_trace(TRACE_ENTRY, "%s(%p, %p, %i, %p, %p, %p, %p)", __func__, input, inpsize, output, outpsize, free_input, config, error);
+ 	int j;
+@@ -81,7 +81,7 @@ static osync_bool conv_opie_xml_contact_
+ 				{
+ 					/* File-as. This is what the Evo plugin does, so copy it. */
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "FormattedName", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "Emails"))
+ 				{
+@@ -89,7 +89,7 @@ static osync_bool conv_opie_xml_contact_
+ 					for(j=0;emailtokens[j]!=NULL;j++) 
+ 					{
+ 						out_xmlfield = osync_xmlfield_new(out_xmlformat, "EMail", error);
+-						osync_xmlfield_set_key_value(out_xmlfield, "Content", emailtokens[j]);
++						osync_xmlfield_set_key_value(out_xmlfield, "Content", emailtokens[j], error);
+ 					}
+ 					g_strfreev(emailtokens);
+ 				}
+@@ -99,21 +99,21 @@ static osync_bool conv_opie_xml_contact_
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Categories", error);
+ 					for(j=0;categorytokens[j]!=NULL;j++) 
+ 					{
+-						osync_xmlfield_add_key_value(out_xmlfield, "Category", categorytokens[j]);
++						osync_xmlfield_add_key_value(out_xmlfield, "Category", categorytokens[j], error);
+ 					}
+ 					g_strfreev(categorytokens);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "DefaultEmail"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "EMail", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 					/* this is the preferred email address */
+ 					osync_xmlfield_set_attr(out_xmlfield, "Preferred", "true");
+ 				}
+ 				else if(!strcasecmp(iprop->name, "HomePhone"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Telephone", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 					osync_xmlfield_set_attr(out_xmlfield, "Location", "Home");
+ 					/* Removed the VOICE tags for the moment as they are assumed if not present, 
+ 					   and if they are KDEPIM shows them up as "Other" */
+@@ -122,21 +122,21 @@ static osync_bool conv_opie_xml_contact_
+ 				else if(!strcasecmp(iprop->name, "HomeFax"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Telephone", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 					osync_xmlfield_set_attr(out_xmlfield, "Location", "Home");
+ 					osync_xmlfield_set_attr(out_xmlfield, "Type", "Fax");
+ 				}
+ 				else if(!strcasecmp(iprop->name, "HomeMobile"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Telephone", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 					osync_xmlfield_set_attr(out_xmlfield, "Location", "Home");
+ 					osync_xmlfield_set_attr(out_xmlfield, "Type", "Cellular");
+ 				}
+ 				else if(!strcasecmp(iprop->name, "BusinessPhone"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Telephone", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 					osync_xmlfield_set_attr(out_xmlfield, "Location", "Work");
+ 					/* Removed the VOICE tags for the moment as they are assumed if not present, 
+ 					   and if they are KDEPIM shows them up as "Other" */
+@@ -145,28 +145,28 @@ static osync_bool conv_opie_xml_contact_
+ 				else if(!strcasecmp(iprop->name, "BusinessFax"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Telephone", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 					osync_xmlfield_set_attr(out_xmlfield, "Location", "Work");
+ 					osync_xmlfield_set_attr(out_xmlfield, "Type", "Fax");
+ 				}
+ 				else if(!strcasecmp(iprop->name, "BusinessMobile"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Telephone", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 					osync_xmlfield_set_attr(out_xmlfield, "Location", "Work");
+ 					osync_xmlfield_set_attr(out_xmlfield, "Type", "Cellular");
+ 				}
+ 				else if(!strcasecmp(iprop->name, "BusinessPager"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Telephone", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 					osync_xmlfield_set_attr(out_xmlfield, "Location", "Work");
+ 					osync_xmlfield_set_attr(out_xmlfield, "Type", "Pager"); /* FIXME is this still supported? */
+ 				}
+ 				else if(!strcasecmp(iprop->name, "HomeWebPage"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Url", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "BusinessWebPage"))
+ 				{
+@@ -175,22 +175,22 @@ static osync_bool conv_opie_xml_contact_
+ 				else if(!strcasecmp(iprop->name, "Spouse"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Spouse", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "Birthday"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Birthday", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "Anniversary"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Anniversary", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "Nickname"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Nickname", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "Children"))
+ 				{
+@@ -199,7 +199,7 @@ static osync_bool conv_opie_xml_contact_
+ 				else if(!strcasecmp(iprop->name, "Notes"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Note", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "rid"))
+ 				{
+@@ -216,22 +216,22 @@ static osync_bool conv_opie_xml_contact_
+ 				else if(!strcasecmp(iprop->name, "Assistant"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Assistant", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "Manager"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Manager", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "Profession"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Profession", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "JobTitle"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Role", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else
+ 				{
+@@ -289,16 +289,18 @@ static osync_bool conv_opie_xml_contact_
+ 	xmlFreeDoc(idoc);
+ 
+ 	// FIXME: remove this later by adding in a pre-sorted way?
+-	osync_xmlformat_sort(out_xmlformat);
++	osync_xmlformat_sort(out_xmlformat, error);
+ 	
+ 	unsigned int size;
+ 	char *str;
+-	osync_xmlformat_assemble(out_xmlformat, &str, &size);
++	osync_xmlformat_assemble(out_xmlformat, &str, &size, error);
+ 	osync_trace(TRACE_INTERNAL, "Output XMLFormat is:\n%s", str);
+ 	g_free(str);
+ 
++	/* replacement?
+ 	if (!osync_xmlformat_validate(out_xmlformat, error))
+ 		goto error;
++	 */
+ 
+ 	osync_trace(TRACE_EXIT, "%s", __func__);
+ 	return TRUE;
+@@ -312,7 +314,7 @@ error:
+ /** Convert OpenSync XML contact to Opie XML contact 
+  * 
+  **/
+-static osync_bool conv_xml_contact_to_opie_xml_contact(char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, OSyncError **error)
++static osync_bool conv_xml_contact_to_opie_xml_contact(char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, void *userdata, OSyncError **error)
+ {
+ 	enum PhoneType {
+ 		PT_HOME = 1,
+@@ -333,7 +335,7 @@ static osync_bool conv_xml_contact_to_op
+ 	OSyncXMLFormat *in_xmlformat = (OSyncXMLFormat *)input;
+ 	unsigned int size;
+ 	char *str;
+-	osync_xmlformat_assemble(in_xmlformat, &str, &size);
++	osync_xmlformat_assemble(in_xmlformat, &str, &size, error);
+ 	osync_trace(TRACE_INTERNAL, "Input XMLFormat is:\n%s", str);
+ 	g_free(str);
+ 
+@@ -525,7 +527,7 @@ error:
+ /** Convert Opie XML todo to OpenSync XML todo 
+  * 
+  **/
+-static osync_bool conv_opie_xml_todo_to_xml_todo(char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, OSyncError **error)
++static osync_bool conv_opie_xml_todo_to_xml_todo(char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, void *userdata, OSyncError **error)
+ {
+ 	osync_trace(TRACE_ENTRY, "%s(%p, %p, %i, %p, %p, %p, %p)", __func__, input, inpsize, output, outpsize, free_input, config, error);
+ 	struct _xmlAttr *iprop;
+@@ -558,12 +560,12 @@ static osync_bool conv_opie_xml_todo_to_
+ 				if(!strcasecmp(iprop->name, "Summary")) 
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Summary", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "Description"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Description", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "Priority"))
+ 				{
+@@ -571,13 +573,13 @@ static osync_bool conv_opie_xml_todo_to_
+ 					int priority = atoi(iprop->children->content);
+ 					char *prio = g_strdup_printf("%d", priority);
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Priority", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", prio);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", prio, error);
+ 					g_free(prio);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "Progress"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "PercentComplete", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "State"))
+ 				{
+@@ -598,12 +600,12 @@ static osync_bool conv_opie_xml_todo_to_
+ 							status = "NEEDS-ACTION";
+ 					}
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Status", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", status);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", status, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "StartDate"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "DateStarted", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 					osync_xmlfield_set_attr(out_xmlfield, "Value", "DATE");
+ 				}
+ 				else if(!strcasecmp(iprop->name, "Categories"))
+@@ -612,7 +614,7 @@ static osync_bool conv_opie_xml_todo_to_
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Categories", error);
+ 					for(j=0;categorytokens[j]!=NULL;j++) 
+ 					{
+-						osync_xmlfield_add_key_value(out_xmlfield, "Category", categorytokens[j]);
++						osync_xmlfield_add_key_value(out_xmlfield, "Category", categorytokens[j], error);
+ 					}
+ 					g_strfreev(categorytokens);
+ 				}
+@@ -626,7 +628,7 @@ static osync_bool conv_opie_xml_todo_to_
+ 				char *completeDate = xmlGetProp(icur, "CompletedDate");
+ 				if(completeDate) { 
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Completed", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", completeDate);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", completeDate, error);
+ 					// RFC2445 says the default value type is DATE-TIME. But Opie only
+ 					// stores DATE as completed date => alter VALUE to DATE
+ 					osync_xmlfield_set_attr(out_xmlfield, "Value", "DATE");
+@@ -652,7 +654,7 @@ static osync_bool conv_opie_xml_todo_to_
+ 					duedatestr = g_strdup_printf("%04d%02d%02d", dateyear, datemonth, dateday);
+ 					duedate = g_date_new_dmy(dateday, datemonth, dateyear);
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Due", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", duedatestr);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", duedatestr, error);
+ 					// RFC2445 says the default value type is DATE-TIME. But Opie only
+ 					// stores DATE as due date => alter VALUE to DATE
+ 					osync_xmlfield_set_attr(out_xmlfield, "Value", "DATE");
+@@ -671,7 +673,7 @@ static osync_bool conv_opie_xml_todo_to_
+ 		char *alarmstr = xmlGetProp(icur, "Alarms");
+ 		if(alarmstr && duedatestr) {
+ 			char *duetimestr = g_strdup_printf("%sT000000", duedatestr);
+-			time_t duetime = osync_time_vtime2unix(duetimestr, 0);
++			time_t duetime = osync_time_vtime2unix(duetimestr, 0, error);
+ 			xml_todo_alarm_attr_to_xmlfield(alarmstr, out_xmlformat, &duetime, error);
+ 			g_free(duetimestr);
+ 		}
+@@ -691,16 +693,18 @@ static osync_bool conv_opie_xml_todo_to_
+ 	xmlFreeDoc(idoc);
+ 
+ 	// FIXME: remove this later by adding in a pre-sorted way?
+-	osync_xmlformat_sort(out_xmlformat);
++	osync_xmlformat_sort(out_xmlformat, error);
+ 	
+ 	unsigned int size;
+ 	char *str;
+-	osync_xmlformat_assemble(out_xmlformat, &str, &size);
++	osync_xmlformat_assemble(out_xmlformat, &str, &size, error);
+ 	osync_trace(TRACE_INTERNAL, "Output XMLFormat is:\n%s", str);
+ 	g_free(str);
+ 
++	/* replacement?
+ 	if (!osync_xmlformat_validate(out_xmlformat, error))
+ 		goto error;
++	 */
+ 	
+ 	osync_trace(TRACE_EXIT, "%s", __func__);
+ 	return TRUE;
+@@ -713,7 +717,7 @@ error:
+ /** Convert OpenSync XML todo to Opie XML todo 
+  * 
+  **/
+-static osync_bool conv_xml_todo_to_opie_xml_todo(char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, OSyncError **error)
++static osync_bool conv_xml_todo_to_opie_xml_todo(char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, void *userdata, OSyncError **error)
+ {
+ 	const char *completedstr = NULL;
+ 	const char *startedstr = NULL;
+@@ -726,7 +730,7 @@ static osync_bool conv_xml_todo_to_opie_
+ 	OSyncXMLFormat *in_xmlformat = (OSyncXMLFormat *)input;
+ 	unsigned int size;
+ 	char *str;
+-	osync_xmlformat_assemble(in_xmlformat, &str, &size);
++	osync_xmlformat_assemble(in_xmlformat, &str, &size, error);
+ 	osync_trace(TRACE_INTERNAL, "Input XMLFormat is:\n%s", str);
+ 	g_free(str);
+ 
+@@ -771,7 +775,7 @@ static osync_bool conv_xml_todo_to_opie_
+ 		else if(!strcmp("Completed", fieldname)) {
+ 			completedstr = osync_xmlfield_get_key_value(in_xmlfield, "Content");
+ 			if(completedstr) {
+-				struct tm *completed = osync_time_vtime2tm(completedstr);
++				struct tm *completed = osync_time_vtime2tm(completedstr, error);
+ 				char *completedstr_out = g_strdup_printf("%04d%02d%02d", completed->tm_year + 1900, (completed->tm_mon + 1), completed->tm_mday);
+ 				xmlSetProp(on_todo, "Completed", "1");
+ 				xmlSetProp(on_todo, "CompletedDate", completedstr_out);
+@@ -782,7 +786,7 @@ static osync_bool conv_xml_todo_to_opie_
+ 		else if(!strcmp("DateStarted", fieldname)) {
+ 			startedstr = osync_xmlfield_get_key_value(in_xmlfield, "Content");
+ 			if(startedstr) {
+-				struct tm *started = osync_time_vtime2tm(startedstr);
++				struct tm *started = osync_time_vtime2tm(startedstr, error);
+ 				char *startedstr_out = g_strdup_printf("%04d%02d%02d", (started->tm_year + 1900), (started->tm_mon + 1), started->tm_mday);
+ 				xmlSetProp(on_todo, "StartDate", startedstr_out);
+ 				g_free(startedstr_out);
+@@ -792,7 +796,7 @@ static osync_bool conv_xml_todo_to_opie_
+ 		else if(!strcmp("Due", fieldname)) {
+ 			duestr = osync_xmlfield_get_key_value(in_xmlfield, "Content");
+ 			if(duestr) {
+-				struct tm *due = osync_time_vtime2tm(duestr);
++				struct tm *due = osync_time_vtime2tm(duestr, error);
+ 				char *dueyear  = g_strdup_printf("%04d", (due->tm_year + 1900));
+ 				char *duemonth = g_strdup_printf("%02d", (due->tm_mon + 1));
+ 				char *dueday   = g_strdup_printf("%02d", due->tm_mday);
+@@ -831,14 +835,14 @@ static osync_bool conv_xml_todo_to_opie_
+ 			}
+ 		}
+ 		else if(!strcmp("RecurrenceRule", fieldname)) {
+-			xmlfield_recur_to_attr(in_xmlfield, on_todo);
++			xmlfield_recur_to_attr(in_xmlfield, on_todo, error);
+ 		}
+ 		
+ 		in_xmlfield = osync_xmlfield_get_next(in_xmlfield);
+ 	}
+ 	
+ 	/* Convert alarms */
+-	xmlformat_todo_alarms_to_attr(in_xmlformat, on_todo, duestr);
++	xmlformat_todo_alarms_to_attr(in_xmlformat, on_todo, duestr, error);
+ 	
+ 	if(!completedstr)
+ 		xmlSetProp(on_todo, "Completed", "0");
+@@ -867,7 +871,7 @@ error:
+ /** Convert Opie XML event to OpenSync XML event 
+  * 
+  **/
+-static osync_bool conv_opie_xml_event_to_xml_event(char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, OSyncError **error)
++static osync_bool conv_opie_xml_event_to_xml_event(char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, void *userdata, OSyncError **error)
+ {
+ 	osync_trace(TRACE_ENTRY, "%s(%p, %p, %i, %p, %p, %p, %p)", __func__, input, inpsize, output, outpsize, free_input, config, error);
+ 	struct _xmlAttr *iprop;
+@@ -911,24 +915,24 @@ static osync_bool conv_opie_xml_event_to
+ 				if(!strcasecmp(iprop->name, "description"))
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Summary", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "note")) 
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Description", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "location")) 
+ 				{
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Location", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "created")) 
+ 				{
+ 					time_t createtime = (time_t)atoi(iprop->children->content);
+-					char *createvtime = osync_time_unix2vtime(&createtime);
++					char *createvtime = osync_time_unix2vtime(&createtime, error);
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "DateCreated", error);
+-					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content);
++					osync_xmlfield_set_key_value(out_xmlfield, "Content", iprop->children->content, error);
+ 					g_free(createvtime);
+ 				}
+ 				else if(!strcasecmp(iprop->name, "start")) 
+@@ -939,14 +943,14 @@ static osync_bool conv_opie_xml_event_to
+ 						struct tm *localtm = g_malloc0(sizeof(struct tm));
+ 						localtime_r(&starttime, localtm);
+ 						char *startvdate = g_strdup_printf("%04d%02d%02d", localtm->tm_year + 1900, (localtm->tm_mon + 1), localtm->tm_mday);
+-						osync_xmlfield_set_key_value(out_xmlfield, "Content", startvdate);
++						osync_xmlfield_set_key_value(out_xmlfield, "Content", startvdate, error);
+ 						osync_xmlfield_set_attr(out_xmlfield, "Value", "DATE");
+ 						g_free(startvdate);
+ 						g_free(localtm);
+ 					}
+ 					else {
+-						char *startvtime = osync_time_unix2vtime(&starttime); 
+-						osync_xmlfield_set_key_value(out_xmlfield, "Content", startvtime);
++						char *startvtime = osync_time_unix2vtime(&starttime, error); 
++						osync_xmlfield_set_key_value(out_xmlfield, "Content", startvtime, error);
+ 						g_free(startvtime);
+ 					}
+ 					/* Record the start date for use later */
+@@ -970,14 +974,14 @@ static osync_bool conv_opie_xml_event_to
+ 						endtime += 1;
+ 						localtime_r(&endtime, localtm);
+ 						char *endvdate = g_strdup_printf("%04d%02d%02d", localtm->tm_year + 1900, (localtm->tm_mon + 1), localtm->tm_mday);
+-						osync_xmlfield_set_key_value(out_xmlfield, "Content", endvdate);
++						osync_xmlfield_set_key_value(out_xmlfield, "Content", endvdate, error);
+ 						osync_xmlfield_set_attr(out_xmlfield, "Value", "DATE");
+ 						g_free(endvdate);
+ 						g_free(localtm);
+ 					}
+ 					else {
+-						char *endvtime = osync_time_unix2vtime(&endtime);
+-						osync_xmlfield_set_key_value(out_xmlfield, "Content", endvtime);
++						char *endvtime = osync_time_unix2vtime(&endtime, error);
++						osync_xmlfield_set_key_value(out_xmlfield, "Content", endvtime, error);
+ 						g_free(endvtime);
+ 					}
+ 				}
+@@ -987,7 +991,7 @@ static osync_bool conv_opie_xml_event_to
+ 					out_xmlfield = osync_xmlfield_new(out_xmlformat, "Categories", error);
+ 					for(j=0;categorytokens[j]!=NULL;j++) 
+ 					{
+-						osync_xmlfield_add_key_value(out_xmlfield, "Category", categorytokens[j]);
++						osync_xmlfield_add_key_value(out_xmlfield, "Category", categorytokens[j], error);
+ 					}
+ 					g_strfreev(categorytokens);
+ 				}
+@@ -1010,13 +1014,13 @@ static osync_bool conv_opie_xml_event_to
+ 				xmlFree(alarmsoundstr);
+ 			}
+ 			if(alarmsound == 1)
+-				osync_xmlfield_set_key_value(out_xmlfield, "AlarmAction", "AUDIO");
++				osync_xmlfield_set_key_value(out_xmlfield, "AlarmAction", "AUDIO", error);
+ 			else
+-				osync_xmlfield_set_key_value(out_xmlfield, "AlarmAction", "DISPLAY");
++				osync_xmlfield_set_key_value(out_xmlfield, "AlarmAction", "DISPLAY", error);
+ 			
+ 			int alarmseconds = -(atoi(alarmminsstr) * 60);
+ 			char *alarmdu = osync_time_sec2alarmdu(alarmseconds);
+-			osync_xmlfield_set_key_value(out_xmlfield, "AlarmTrigger", alarmdu);
++			osync_xmlfield_set_key_value(out_xmlfield, "AlarmTrigger", alarmdu, error);
+ 			g_free(alarmdu);
+ 			xmlFree(alarmminsstr);
+ 		}
+@@ -1032,16 +1036,18 @@ static osync_bool conv_opie_xml_event_to
+ 	xmlFreeDoc(idoc);
+ 
+ 	// FIXME: remove this later by adding in a pre-sorted way?
+-	osync_xmlformat_sort(out_xmlformat);
++	osync_xmlformat_sort(out_xmlformat, error);
+ 	
+ 	unsigned int size;
+ 	char *str;
+-	osync_xmlformat_assemble(out_xmlformat, &str, &size);
++	osync_xmlformat_assemble(out_xmlformat, &str, &size, error);
+ 	osync_trace(TRACE_INTERNAL, "Output XMLFormat is:\n%s", str);
+ 	g_free(str);
+ 
++	/* replacement?
+ 	if (!osync_xmlformat_validate(out_xmlformat, error))
+ 		goto error;
++	 */
+ 	
+ 	osync_trace(TRACE_EXIT, "%s", __func__);
+ 	return TRUE;
+@@ -1055,7 +1061,7 @@ error:
+ /** Convert OpenSync XML event to Opie XML event 
+  * 
+  **/
+-static osync_bool conv_xml_event_to_opie_xml_event(char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, OSyncError **error)
++static osync_bool conv_xml_event_to_opie_xml_event(char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, void *userdata, OSyncError **error)
+ {
+ 	time_t start_time = 0;
+ 	time_t end_time = 0;
+@@ -1067,7 +1073,7 @@ static osync_bool conv_xml_event_to_opie
+ 	OSyncXMLFormat *in_xmlformat = (OSyncXMLFormat *)input;
+ 	unsigned int size;
+ 	char *str;
+-	osync_xmlformat_assemble(in_xmlformat, &str, &size);
++	osync_xmlformat_assemble(in_xmlformat, &str, &size, error);
+ 	osync_trace(TRACE_INTERNAL, "Input XMLFormat is:\n%s", str);
+ 	g_free(str);
+ 
+@@ -1093,19 +1099,19 @@ static osync_bool conv_xml_event_to_opie
+ 			xmlfield_key_to_attr(in_xmlfield, "Content", on_event, "location");
+ 		}
+ 		else if(!strcmp("DateCreated", fieldname)) {
+-			xmlfield_vtime_to_attr_time_t(in_xmlfield, on_event, "created");
++			xmlfield_vtime_to_attr_time_t(in_xmlfield, on_event, "created", error);
+ 		}
+ 		else if(!strcmp("DateStarted", fieldname)) {
+-			start_time = xmlfield_vtime_to_attr_time_t(in_xmlfield, on_event, "start");
++			start_time = xmlfield_vtime_to_attr_time_t(in_xmlfield, on_event, "start", error);
+ 		}
+ 		else if(!strcmp("DateEnd", fieldname)) {
+-			end_time = xmlfield_vtime_to_attr_time_t(in_xmlfield, on_event, "end");
++			end_time = xmlfield_vtime_to_attr_time_t(in_xmlfield, on_event, "end", error);
+ 		}
+ 		else if(!strcmp("Categories", fieldname)) {
+ 			xmlfield_categories_to_attr(in_xmlfield, on_event, "Categories");
+ 		}
+ 		else if(!strcmp("RecurrenceRule", fieldname)) {
+-			xmlfield_recur_to_attr(in_xmlfield, on_event);
++			xmlfield_recur_to_attr(in_xmlfield, on_event, error);
+ 		}
+ 		
+ 		in_xmlfield = osync_xmlfield_get_next(in_xmlfield);
+@@ -1148,7 +1154,7 @@ error:
+ /** Convert Opie XML note (which is internal to the plugin, see opie_comms.c) to OpenSync XML note
+  * 
+  **/
+-static osync_bool conv_opie_xml_note_to_xml_note(char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, OSyncError **error)
++static osync_bool conv_opie_xml_note_to_xml_note(char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, void *userdata, OSyncError **error)
+ {
+ 	osync_trace(TRACE_ENTRY, "%s(%p, %p, %i, %p, %p, %p, %p)", __func__, input, inpsize, output, outpsize, free_input, config, error);
+ 		
+@@ -1176,14 +1182,14 @@ static osync_bool conv_opie_xml_note_to_
+ 		char *value = xmlGetProp(icur, "name");
+ 		if(value) {
+ 			out_xmlfield = osync_xmlfield_new(out_xmlformat, "Summary", error);
+-			osync_xmlfield_set_key_value(out_xmlfield, "Content", value);
++			osync_xmlfield_set_key_value(out_xmlfield, "Content", value, error);
+ 			xmlFree(value);
+ 		}
+ 		// Body
+ 		value = xmlGetProp(icur, "content");
+ 		if(value) {
+ 			out_xmlfield = osync_xmlfield_new(out_xmlformat, "Body", error);
+-			osync_xmlfield_set_key_value(out_xmlfield, "Content", value);
++			osync_xmlfield_set_key_value(out_xmlfield, "Content", value, error);
+ 			xmlFree(value);
+ 		}
+ 	}
+@@ -1195,16 +1201,18 @@ static osync_bool conv_opie_xml_note_to_
+ 	xmlFreeDoc(idoc);
+ 
+ 	// FIXME: remove this later by adding in a pre-sorted way?
+-	osync_xmlformat_sort(out_xmlformat);
++	osync_xmlformat_sort(out_xmlformat, error);
+ 	
+ 	unsigned int size;
+ 	char *str;
+-	osync_xmlformat_assemble(out_xmlformat, &str, &size);
++	osync_xmlformat_assemble(out_xmlformat, &str, &size, error);
+ 	osync_trace(TRACE_INTERNAL, "Output XMLFormat is:\n%s", str);
+ 	g_free(str);
+ 
++	/* replacement?
+ 	if (!osync_xmlformat_validate(out_xmlformat, error))
+ 		goto error;
++	 */
+ 	
+ 	osync_trace(TRACE_EXIT, "%s", __func__);
+ 	return TRUE;
+@@ -1218,7 +1226,7 @@ error:
+ /** Convert OpenSync XML note to Opie XML note (which is internal to the plugin)
+  * 
+  **/
+-static osync_bool conv_xml_note_to_opie_xml_note(char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, OSyncError **error)
++static osync_bool conv_xml_note_to_opie_xml_note(char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, void *userdata, OSyncError **error)
+ {
+ 	osync_trace(TRACE_ENTRY, "%s(%p, %p, %i, %p, %p, %p, %p)", 
+ 							__func__, input, inpsize, output, 
+@@ -1227,7 +1235,7 @@ static osync_bool conv_xml_note_to_opie_
+ 	OSyncXMLFormat *in_xmlformat = (OSyncXMLFormat *)input;
+ 	unsigned int size;
+ 	char *str;
+-	osync_xmlformat_assemble(in_xmlformat, &str, &size);
++	osync_xmlformat_assemble(in_xmlformat, &str, &size, error);
+ 	osync_trace(TRACE_INTERNAL, "Input XMLFormat is:\n%s", str);
+ 	g_free(str);
+ 
+@@ -1280,28 +1288,28 @@ osync_bool get_format_info(OSyncFormatEn
+ 	osync_objformat_set_destroy_func(format, destroy_format1);
+ 	osync_objformat_set_duplicate_func(format, duplicate_format1);
+ 	osync_objformat_set_print_func(format, print_format1);*/
+-	osync_format_env_register_objformat(env, format);
++	osync_format_env_register_objformat(env, format, error);
+ 	osync_objformat_unref(format);
+ 	
+ 	/* Todo */
+ 	format = osync_objformat_new(OPIE_FORMAT_XML_TODO, "todo", error);
+ 	if (!format)
+ 		return FALSE;
+-	osync_format_env_register_objformat(env, format);
++	osync_format_env_register_objformat(env, format, error);
+ 	osync_objformat_unref(format);
+ 
+ 	/* Event */
+ 	format = osync_objformat_new(OPIE_FORMAT_XML_EVENT, "event", error);
+ 	if (!format)
+ 		return FALSE;
+-	osync_format_env_register_objformat(env, format);
++	osync_format_env_register_objformat(env, format, error);
+ 	osync_objformat_unref(format);
+ 
+ 	/* Note */
+ 	format = osync_objformat_new(OPIE_FORMAT_XML_NOTE, "note", error);
+ 	if (!format)
+ 		return FALSE;
+-	osync_format_env_register_objformat(env, format);
++	osync_format_env_register_objformat(env, format, error);
+ 	osync_objformat_unref(format);
+ 
+ 	return TRUE;
+@@ -1330,14 +1338,14 @@ osync_bool register_converter(OSyncForma
+ 	if (!conv)
+ 		return FALSE;
+ 
+-	osync_format_env_register_converter(env, conv);
++	osync_format_env_register_converter(env, conv, error);
+ 	osync_converter_unref(conv);
+ 
+ 	conv = osync_converter_new(OSYNC_CONVERTER_CONV, format2, format1, conv_format2_to_format1, error);
+ 	if (!conv)
+ 		return FALSE;
+ 
+-	osync_format_env_register_converter(env, conv);
++	osync_format_env_register_converter(env, conv, error);
+ 	osync_converter_unref(conv);
+ 	return TRUE;
+ }
+@@ -1370,19 +1378,19 @@ void xmlfield_key_to_attr(OSyncXMLField
+ 		xmlSetProp(node_to, attrname, value);
+ }
+ 
+-time_t xmlfield_vtime_to_attr_time_t(OSyncXMLField *xmlfield, xmlNode *node_to, const char *attrname) {
++time_t xmlfield_vtime_to_attr_time_t(OSyncXMLField *xmlfield, xmlNode *node_to, const char *attrname, OSyncError **error) {
+ 	const char *vtime = osync_xmlfield_get_key_value(xmlfield, "Content");
+ 	time_t utime = 0;
+ 	if(vtime) {
+ 		const char *vtimetype = osync_xmlfield_get_attr(xmlfield, "Value");
+ 		if(vtimetype && !strcasecmp(vtimetype, "DATE")) {
+ 			/* vtime has date but no time, so we treat it as midnight local time */
+-			struct tm *localtm = osync_time_vtime2tm(vtime);
++			struct tm *localtm = osync_time_vtime2tm(vtime, error);
+ 			utime = mktime(localtm);
+ 			g_free(localtm);
+ 		}
+ 		else
+-			utime = osync_time_vtime2unix(vtime, 0);
++			utime = osync_time_vtime2unix(vtime, 0, error);
+ 				
+ 		char *timestr = g_strdup_printf("%d", (int)utime);
+ 		xmlSetProp(node_to, attrname, timestr);
+@@ -1403,7 +1411,7 @@ OSyncXMLField *xml_attrs_to_xmlfield_key
+ 			char *key = (char *)(keysptr->data);
+ 			if(!out_xmlfield)
+ 				out_xmlfield = osync_xmlfield_new(out_xmlformat, fieldname, error);
+-			osync_xmlfield_set_key_value(out_xmlfield, key, value);
++			osync_xmlfield_set_key_value(out_xmlfield, key, value, error);
+ 			xmlFree(value);
+ 		}
+ 		
+@@ -1453,10 +1461,10 @@ void xml_recur_attr_to_xmlfield(xmlNode
+ 		
+ 		/* Frequency */
+ 		if(!strcmp(recurType, "Daily")) {
+-			osync_xmlfield_set_key_value(out_xmlfield, "Frequency", "DAILY");
++			osync_xmlfield_set_key_value(out_xmlfield, "Frequency", "DAILY", error);
+ 		}
+ 		else if(!strcmp(recurType, "Weekly")) {
+-			osync_xmlfield_set_key_value(out_xmlfield, "Frequency", "WEEKLY");
++			osync_xmlfield_set_key_value(out_xmlfield, "Frequency", "WEEKLY", error);
+ 			
+ 			/* Weekdays */
+ 			char *weekdays = xmlGetProp(item_node, "rweekdays");
+@@ -1483,22 +1491,22 @@ void xml_recur_attr_to_xmlfield(xmlNode
+ 					/* Remove the trailing comma */
+ 					g_string_truncate(byday, strlen(byday->str) - 1);
+ 				
+-					osync_xmlfield_set_key_value(out_xmlfield, "ByDay", byday->str);
++					osync_xmlfield_set_key_value(out_xmlfield, "ByDay", byday->str, error);
+ 					g_string_free(byday, TRUE);
+ 				}
+ 				xmlFree(weekdays);
+ 			}
+ 		}
+ 		else if(!strcmp(recurType, "MonthlyDate")) {
+-			osync_xmlfield_set_key_value(out_xmlfield, "Frequency", "MONTHLY");
++			osync_xmlfield_set_key_value(out_xmlfield, "Frequency", "MONTHLY", error);
+ 			if(startdate) {
+ 				char *bymonthday = g_strdup_printf("%i", (int)g_date_get_day(startdate));
+-				osync_xmlfield_set_key_value(out_xmlfield, "ByMonthDay", bymonthday);
++				osync_xmlfield_set_key_value(out_xmlfield, "ByMonthDay", bymonthday, error);
+ 				g_free(bymonthday);
+ 			}
+ 		}
+ 		else if(!strcmp(recurType, "MonthlyDay")) {
+-			osync_xmlfield_set_key_value(out_xmlfield, "Frequency", "MONTHLY");
++			osync_xmlfield_set_key_value(out_xmlfield, "Frequency", "MONTHLY", error);
+ 			if(startdate) {
+ 				int weekno;
+ 				char *weeknostr = xmlGetProp(item_node, "rposition");
+@@ -1538,19 +1546,19 @@ void xml_recur_attr_to_xmlfield(xmlNode
+ 						break;
+ 				}
+ 				if(byday) {
+-					osync_xmlfield_set_key_value(out_xmlfield, "ByDay", byday);
++					osync_xmlfield_set_key_value(out_xmlfield, "ByDay", byday, error);
+ 					g_free(byday);
+ 				}
+ 			}
+ 		}
+ 		else if(!strcmp(recurType, "Yearly")) {
+-			osync_xmlfield_set_key_value(out_xmlfield, "Frequency", "YEARLY");
++			osync_xmlfield_set_key_value(out_xmlfield, "Frequency", "YEARLY", error);
+ 		}
+ 
+ 		/* Interval */
+ 		char *interval = xmlGetProp(item_node, "rfreq");
+ 		if(interval) {
+-			osync_xmlfield_set_key_value(out_xmlfield, "Interval", interval);
++			osync_xmlfield_set_key_value(out_xmlfield, "Interval", interval, error);
+ 			xmlFree(interval);
+ 		}
+ 		
+@@ -1560,8 +1568,8 @@ void xml_recur_attr_to_xmlfield(xmlNode
+ 			char *recurendstr = xmlGetProp(item_node, "enddt");
+ 			if(recurendstr) {
+ 				time_t recurendtime = (time_t)atoi(recurendstr);
+-				char *recurendvtime = osync_time_unix2vtime(&recurendtime); 
+-				osync_xmlfield_set_key_value(out_xmlfield, "Until", recurendvtime);
++				char *recurendvtime = osync_time_unix2vtime(&recurendtime, error); 
++				osync_xmlfield_set_key_value(out_xmlfield, "Until", recurendvtime, error);
+ 				g_free(recurendvtime);
+ 				xmlFree(recurendstr);
+ 			}
+@@ -1571,7 +1579,7 @@ void xml_recur_attr_to_xmlfield(xmlNode
+ 	}
+ }
+ 
+-void xmlfield_recur_to_attr(OSyncXMLField *in_xmlfield, xmlNode *node_to) {
++void xmlfield_recur_to_attr(OSyncXMLField *in_xmlfield, xmlNode *node_to, OSyncError **error) {
+ 	/* Recurrence for todos and events */
+ 	char *enddt = NULL;
+ 	char *weekdaysrule = NULL;
+@@ -1620,7 +1628,7 @@ void xmlfield_recur_to_attr(OSyncXMLFiel
+ 			rfreq = g_strdup(keyvalue);
+ 		}
+ 		else if (!strcasecmp(keyname, "UNTIL")) {
+-			time_t utime = osync_time_vtime2unix(keyvalue, 0);
++			time_t utime = osync_time_vtime2unix(keyvalue, 0, error);
+ 			enddt = g_strdup_printf("%d", (int)utime);
+ 		}
+ 	}
+@@ -1725,20 +1733,20 @@ void xml_todo_alarm_attr_to_xmlfield(con
+ 			g_strfreev(alarmargs);
+ 			
+ 			if(alarmsound == 1)
+-				osync_xmlfield_set_key_value(out_xmlfield, "AlarmAction", "AUDIO");
++				osync_xmlfield_set_key_value(out_xmlfield, "AlarmAction", "AUDIO", error);
+ 			else
+-				osync_xmlfield_set_key_value(out_xmlfield, "AlarmAction", "DISPLAY");
++				osync_xmlfield_set_key_value(out_xmlfield, "AlarmAction", "DISPLAY", error);
+ 			
+ 			if(alarmdatestr) {
+-				struct tm *alarmtm = osync_time_vtime2tm(alarmdatestr);
++				struct tm *alarmtm = osync_time_vtime2tm(alarmdatestr, error);
+ 				time_t alarmtime = mktime(alarmtm);
+ 				g_free(alarmtm);
+-				char *alarmdatestr_utc = osync_time_unix2vtime(&alarmtime);
++				char *alarmdatestr_utc = osync_time_unix2vtime(&alarmtime, error);
+ 				
+ 				if(starttime) {
+ 					char *alarmdu = osync_time_sec2alarmdu((int)difftime(alarmtime, *starttime)); 
+ 					if(alarmdu) {
+-						osync_xmlfield_set_key_value(out_xmlfield, "AlarmTrigger", alarmdu);
++						osync_xmlfield_set_key_value(out_xmlfield, "AlarmTrigger", alarmdu, error);
+ 						g_free(alarmdu);
+ 					}
+ 				}
+@@ -1751,7 +1759,7 @@ void xml_todo_alarm_attr_to_xmlfield(con
+ 	}
+ }
+ 
+-void xmlformat_todo_alarms_to_attr(OSyncXMLFormat *in_xmlformat, xmlNode *node_to, const char *duedate) {
++void xmlformat_todo_alarms_to_attr(OSyncXMLFormat *in_xmlformat, xmlNode *node_to, const char *duedate, OSyncError **error) {
+ 	/* Convert OpenSync XML Alarm entries on a todo node to Opie Alarms attribute value */
+ 	
+ 	GString *alarms = g_string_new("");
+@@ -1768,7 +1776,7 @@ void xmlformat_todo_alarms_to_attr(OSync
+ 					
+ 				if(duedate) {
+ 					int alarmdiff = osync_time_alarmdu2sec(trigger);
+-					alarmtm = osync_time_vtime2tm(duedate);
++					alarmtm = osync_time_vtime2tm(duedate, error);
+ 					alarmtime = timegm(alarmtm);
+ 					alarmtime += alarmdiff;
+ 				}
+--- libopensync-plugin-opie-0.38/src/opie_sync.c.orig	2008-11-10 16:33:42.000000000 +0100
++++ libopensync-plugin-opie-0.38/src/opie_sync.c	2025-09-06 09:00:13.868506077 +0200
+@@ -25,7 +25,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE
+ #include <opensync/opensync-data.h>
+ #include <opensync/opensync-format.h>
+ #include <opensync/opensync-plugin.h>
+-#include <opensync/opensync-context.h>
+ #include <opensync/opensync-helper.h>
+ #include <opensync/opensync-version.h>
+ 
+@@ -249,11 +248,10 @@ error:
+ }
+ 
+ 
+-static void connect(void *userdata, OSyncPluginInfo *info, OSyncContext *ctx)
++static void connect(OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, void *userdata)
+ {
+ 	osync_trace(TRACE_ENTRY, "%s(%p, %p, %p)", __func__, userdata, info, ctx);
+-	OSyncObjTypeSink *sink = osync_plugin_info_get_sink(info);
+-	OpieSinkEnv *env = osync_objtype_sink_get_userdata(sink);
++	OpieSinkEnv *env = (OpieSinkEnv*)userdata;
+ 
+ 	OSyncError *error = NULL;
+ 
+@@ -275,7 +275,7 @@ static void connect(OSyncObjTypeSink *si
+ 	g_mutex_unlock(env->plugin_env->plugin_mutex);
+ 	
+ 	/* pull the required data back */
+-	if(!opie_fetch_sink(env))
++	if(!opie_fetch_sink(env, ctx))
+ 	{
+ 		/* failed */
+ 		char *errmsg;
+@@ -289,23 +287,23 @@ static void connect(void *userdata, OSyn
+ 	}
+ 
+ 	/* Get hashtable */
+-	const char *configdir = osync_plugin_info_get_configdir(info);
+-	char *tablepath = g_strdup_printf("%s/hashtable.db", configdir);
+-	env->hashtable = osync_hashtable_new(tablepath, osync_objtype_sink_get_name(sink), &error);
+-	g_free(tablepath);
+-	if (!env->hashtable)
+-		goto error;
+-	if(!osync_hashtable_load(env->hashtable, &error))
+-		goto error;
++	osync_objtype_sink_enable_hashtable(sink, TRUE);
++
++	/* State database */
++	osync_objtype_sink_enable_state_db(sink, TRUE);
+ 
+ 	if(env->objtype == OPIE_OBJECT_TYPE_NOTE) {
+ 		/* Check if the notestype config option has changed since the last sync */
+-		char *anchorpath = g_strdup_printf("%s/anchor.db", osync_plugin_info_get_configdir(info));
++		OSyncSinkStateDB *state_db = osync_objtype_sink_get_state_db(sink);
+ 		char *notes_type_str = g_strdup_printf("%d", env->plugin_env->notes_type);
+-		if (!osync_anchor_compare(anchorpath, "notestype", notes_type_str))
+-			osync_objtype_sink_set_slowsync(sink, TRUE);
++		osync_bool notes_match;
++		if (!osync_sink_state_equal(state_db, "notestype", notes_type_str, &notes_match, &error)) {
++			g_free(notes_type_str);
++			goto error;
++		}
++		if (!notes_match)
++			osync_context_report_slowsync(ctx);
+ 		g_free(notes_type_str);
+-		g_free(anchorpath);
+ 	}
+ 	
+ 	osync_context_report_success(ctx);
+@@ -318,15 +316,14 @@ error:
+ 	osync_error_unref(&error);
+ }
+ 
+-static void get_changes(void *userdata, OSyncPluginInfo *info, OSyncContext *ctx)
++static void get_changes(OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, osync_bool slow_sync, void *userdata)
+ {
+ 	osync_trace(TRACE_ENTRY, "%s(%p, %p, %p)", __func__, userdata, info, ctx);
+-	OSyncObjTypeSink *sink = osync_plugin_info_get_sink(info);
+-	OpieSinkEnv *env = osync_objtype_sink_get_userdata(sink);
++	OpieSinkEnv *env = (OpieSinkEnv *)userdata;
+ 
+ 	OSyncError *error = NULL;
+ 
+-	if (osync_objtype_sink_get_slowsync(sink)) {
++	if (slow_sync) {
+ 		osync_trace(TRACE_INTERNAL, "Slow sync requested");
+ 
+ 		if (!osync_hashtable_slowsync(env->hashtable, &error)) {
+@@ -444,11 +441,10 @@ static void get_changes(void *userdata,
+ 	osync_trace(TRACE_EXIT, "%s", __func__);
+ }
+ 
+-static void commit_change(void *userdata, OSyncPluginInfo *info, OSyncContext *ctx, OSyncChange *change)
++static void commit_change(OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, OSyncChange *change, void *userdata)
+ {
+ 	osync_trace(TRACE_ENTRY, "%s(%p, %p, %p)", __func__, userdata, info, ctx);
+-	OSyncObjTypeSink *sink = osync_plugin_info_get_sink(info);
+-	OpieSinkEnv *env = osync_objtype_sink_get_userdata(sink);
++	OpieSinkEnv *env = (OpieSinkEnv *)userdata;
+ 
+ 	OSyncError *error = NULL;
+ 	const char *ext_uid = osync_change_get_uid(change);
+@@ -549,11 +545,10 @@ error:
+ 	osync_error_unref(&error);
+ }
+ 
+-static void sync_done(void *userdata, OSyncPluginInfo *info, OSyncContext *ctx)
++static void sync_done(OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, void *userdata)
+ {
+ 	osync_trace(TRACE_ENTRY, "%s(%p, %p, %p)", __func__, userdata, info, ctx);
+-	OSyncObjTypeSink *sink = osync_plugin_info_get_sink(info);
+-	OpieSinkEnv *env = osync_objtype_sink_get_userdata(sink);
++	OpieSinkEnv *env = (OpieSinkEnv *)userdata;
+ 	OSyncError *error = NULL;
+ 	
+ 	if ( !opie_put_sink(env) ) {
+@@ -565,16 +560,16 @@ static void sync_done(void *userdata, OS
+ 	}
+ 	
+ 	if(env->objtype == OPIE_OBJECT_TYPE_NOTE) {
+-		char *anchorpath = g_strdup_printf("%s/anchor.db", osync_plugin_info_get_configdir(info));
++		OSyncSinkStateDB *state_db = osync_objtype_sink_get_state_db(sink);
+ 		char *notes_type_str = g_strdup_printf("%d", env->plugin_env->notes_type);
+- 		osync_anchor_update(anchorpath, "notestype", notes_type_str);
++		if (!osync_sink_state_set(state_db, "notestype", notes_type_str, &error))
++		{
++			g_free(notes_type_str);
++			goto error;
++		}
+ 		g_free(notes_type_str);
+-		g_free(anchorpath);
+ 	}
+ 	
+-	if (!osync_hashtable_save(env->hashtable, &error))
+-		goto error;
+-	
+ 	osync_context_report_success(ctx);
+ 	osync_trace(TRACE_EXIT, "%s", __func__);
+ 	return;
+@@ -585,15 +580,10 @@ error:
+ 	osync_error_unref(&error);
+ }
+ 
+-static void disconnect(void *userdata, OSyncPluginInfo *info, OSyncContext *ctx)
++static void disconnect(OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, void *userdata)
+ {
+-	OSyncObjTypeSink *sink = osync_plugin_info_get_sink(info);
+-	OpieSinkEnv *env = osync_objtype_sink_get_userdata(sink);
++	OpieSinkEnv *env = (OpieSinkEnv *)userdata;
+ 	
+-	/* Close the hashtable */
+-	osync_hashtable_unref(env->hashtable);
+-	env->hashtable = NULL;
+-
+ 	//Answer the call
+ 	osync_context_report_success(ctx);
+ }
+@@ -620,17 +610,13 @@ OpieSinkEnv *opie_sync_create_sink_env(O
+ 	sink_env->objformat = osync_format_env_find_objformat(formatenv, objformat);
+ 
+ 	/* Every sink can have different functions ... */
+-	OSyncObjTypeSinkFunctions functions;
+-	memset(&functions, 0, sizeof(functions));
+-	functions.connect = connect;
+-	functions.disconnect = disconnect;
+-	functions.get_changes = get_changes;
+-	functions.commit = commit_change;
+-	functions.sync_done = sync_done;
+-
+-	/* We pass the sink_env object to the sink, so we dont have to look it up
+-		* again once the functions are called */
+-	osync_objtype_sink_set_functions(sink, functions, sink_env);
++	osync_objtype_sink_set_userdata(sink, sink_env);
++	osync_objtype_sink_set_connect_func(sink, connect);
++	osync_objtype_sink_set_disconnect_func(sink, disconnect);
++	osync_objtype_sink_set_get_changes_func(sink, get_changes);
++	osync_objtype_sink_set_commit_func(sink, commit_change);
++	osync_objtype_sink_set_sync_done_func(sink, sync_done);
++
+ 	osync_plugin_info_add_objtype(info, sink);
+ 	
+ 	return sink_env;
+@@ -715,15 +701,15 @@ static void opie_sync_finalize( void* us
+ 	osync_trace(TRACE_EXIT, "%s", __func__);
+ }
+ 
+-static osync_bool opie_sync_discover(void *data, OSyncPluginInfo *info, OSyncError **error)
++static osync_bool opie_sync_discover(OSyncPluginInfo *info, void *data, OSyncError **error)
+ {
+ 	osync_trace(TRACE_ENTRY, "%s(%p, %p, %p)", __func__, data, info, error);
+ 	
+ 	OpiePluginEnv *env = (OpiePluginEnv *)data;
+ 	
+-	int i, numobjs = osync_plugin_info_num_objtypes(info);
+-	for (i = 0; i < numobjs; i++) {
+-		OSyncObjTypeSink *sink = osync_plugin_info_nth_objtype(info, i);
++	OSyncList *s, *sinks = osync_plugin_info_get_objtype_sinks(info);
++	for (s = sinks; s; s = s->next) {
++		OSyncObjTypeSink *sink = (OSyncObjTypeSink *) s->data;
+ 		g_assert(sink);
+ 
+ 		osync_objtype_sink_set_available(sink, TRUE);
+@@ -767,7 +753,7 @@ osync_bool get_sync_info(OSyncPluginEnv
+ 	osync_plugin_set_finalize(plugin, opie_sync_finalize);
+ 	osync_plugin_set_discover(plugin, opie_sync_discover);
+ 
+-	osync_plugin_env_register_plugin(env, plugin);
++	osync_plugin_env_register_plugin(env, plugin, error);
+ 	osync_plugin_unref(plugin);
+ 	
+ 	return TRUE;
+--- libopensync-plugin-opie-0.38/src/opie_comms.h.orig	2008-11-10 16:33:42.000000000 +0100
++++ libopensync-plugin-opie-0.38/src/opie_comms.h	2025-09-06 09:13:55.907386044 +0200
+@@ -39,8 +39,8 @@ void comms_shutdown();
+ 
+ 
+ /* connect to the device and pull down the data */
+-gboolean opie_fetch_sink(OpieSinkEnv *env);
+-gboolean opie_fetch_file(OpiePluginEnv *env, OPIE_OBJECT_TYPE objtype, const char *remotefile, xmlDoc **doc, OSyncObjTypeSink *sink);
++gboolean opie_fetch_sink(OpieSinkEnv *env, OSyncContext *ctx);
++gboolean opie_fetch_file(OpiePluginEnv *env, OPIE_OBJECT_TYPE objtype, const char *remotefile, xmlDoc **doc, OSyncContext *ctx);
+ 
+ /* connect to the device and push the files back */
+ gboolean opie_put_sink(OpieSinkEnv *env);
+--- libopensync-plugin-opie-0.38/src/opie_comms.c.orig	2008-11-10 16:33:42.000000000 +0100
++++ libopensync-plugin-opie-0.38/src/opie_comms.c	2025-09-06 09:15:32.646861961 +0200
+@@ -250,18 +250,18 @@ char *get_remote_notes_path(OpiePluginEn
+ /*
+  * opie_fetch_sink
+  */
+-gboolean opie_fetch_sink(OpieSinkEnv *env)
++gboolean opie_fetch_sink(OpieSinkEnv *env, OSyncContext *ctx)
+ {
+-	return opie_fetch_file(env->plugin_env, env->objtype, env->remotefile, &env->doc, env->sink);
++	return opie_fetch_file(env->plugin_env, env->objtype, env->remotefile, &env->doc, ctx);
+ }
+ 
+ 
+ /*
+  * opie_fetch_file
+  */
+-gboolean opie_fetch_file(OpiePluginEnv *env, OPIE_OBJECT_TYPE objtype, const char *remotefile, xmlDoc **doc, OSyncObjTypeSink *sink)
++gboolean opie_fetch_file(OpiePluginEnv *env, OPIE_OBJECT_TYPE objtype, const char *remotefile, xmlDoc **doc, OSyncContext *ctx)
+ {
+-	osync_trace(TRACE_ENTRY, "%s(%p, %i, %s, %p, %p)", __func__, env, objtype, remotefile, doc, sink);
++	osync_trace(TRACE_ENTRY, "%s(%p, %i, %s, %p, %p)", __func__, env, objtype, remotefile, doc, ctx);
+ 	
+ 	gboolean rc = TRUE;
+ 	
+@@ -338,8 +338,8 @@ gboolean opie_fetch_file(OpiePluginEnv *
+ 		{
+ 			if(!data) {
+ 				/* File didn't exist on the handheld (ie, clean device) */
+-				if(sink)
+-					osync_objtype_sink_set_slowsync(sink, TRUE);
++				if(ctx)
++					osync_context_report_slowsync(ctx);
+ 				*doc = opie_xml_create_doc(objtype);
+ 				if(*doc == 0)
+ 					rc = FALSE;

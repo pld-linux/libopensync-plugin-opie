@@ -1,20 +1,25 @@
 Summary:	OpenSync Plugin for Opie
 Summary(pl.UTF-8):	Wtyczka Opie do OpenSync
 Name:		libopensync-plugin-opie
-Version:	0.22
+Version:	0.38
 Release:	1
 License:	GPL v2
 Group:		Libraries
-Source0:	http://www.opensync.org/attachment/wiki/download/%{name}-%{version}.tar.bz2?format=raw
-# Source0-md5:	29b0fea90a4782f68e8017db32e3b6ea
-URL:		http://www.opensync.org/
+# originally http://www.opensync.org/attachment/wiki/download/%{name}-%{version}.tar.bz2?format=raw, dead now
+# taken from http://ftp.iij.ad.jp/pub/linux/momonga/6/Everything/SOURCES/libopensync-plugin-opie-0.38.tar.bz2
+Source0:	%{name}-%{version}.tar.bz2
+# Source0-md5:	5af4a3afd3f497edd682f1c88dfebf48
+Patch0:		%{name}-libopensync0.39.patch
+# domain dead
+#URL:		http://www.opensync.org/
+BuildRequires:	cmake
 BuildRequires:	curl-devel
 BuildRequires:	glib2-devel >= 1:2.10
-BuildRequires:	libopensync-devel >= %{version}
+BuildRequires:	libopensync-devel >= 0.39
 BuildRequires:	libxml2-devel >= 2.0
-BuildRequires:	openssl-devel >= 0.9.7
-BuildRequires:	pkgconfig
+BuildRequires:	rpmbuild(macros) >= 1.605
 Requires:	glib2 >= 1:2.10
+Requires:	libopensync >= 0.39
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
 %description
@@ -31,18 +36,20 @@ urządzeniach Sharp Zaurus, ale nie było to testowane.
 
 %prep
 %setup -q
+%patch -P0 -p1
 
 %build
-%configure
+install -d build
+cd build
+%cmake ..
+
 %{__make}
 
 %install
 rm -rf $RPM_BUILD_ROOT
 
-%{__make} install \
+%{__make} -C build install \
 	DESTDIR=$RPM_BUILD_ROOT
-
-rm -f $RPM_BUILD_ROOT%{_libdir}/opensync/{plugins,formats}/*.la
 
 %clean
 rm -rf $RPM_BUILD_ROOT
@@ -50,9 +57,6 @@ rm -rf $RPM_BUILD_ROOT
 %files
 %defattr(644,root,root,755)
 %doc AUTHORS README
-%attr(755,root,root) %{_libdir}/opensync/plugins/opie_sync.so
-%attr(755,root,root) %{_libdir}/opensync/formats/opie.so
-%{_datadir}/opensync/defaults/opie-sync
-
-# devel
-#%{_includedir}/opensync-1.0/opensync/opie_sync.h
+%attr(755,root,root) %{_libdir}/libopensync1/formats/opie.so
+%attr(755,root,root) %{_libdir}/libopensync1/plugins/opie-sync.so
+%{_datadir}/libopensync1/defaults/opie-sync
