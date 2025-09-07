@@ -863,8 +863,18 @@
  					alarmtime = timegm(alarmtm);
  					alarmtime += alarmdiff;
  				}
+--- libopensync-plugin-opie-0.38/src/opie_sync.h.orig	2008-11-10 16:33:42.000000000 +0100
++++ libopensync-plugin-opie-0.38/src/opie_sync.h	2025-09-07 13:44:10.688140727 +0200
+@@ -94,7 +94,6 @@ struct OpieSinkEnv {
+ 	OpiePluginEnv*    plugin_env;
+ 	OSyncObjTypeSink* sink;
+ 	xmlDoc*           doc;
+-	OSyncHashTable*   hashtable;
+ 	OSyncObjFormat*   objformat;
+ 	const char*       listelement;
+ 	const char*       itemelement;
 --- libopensync-plugin-opie-0.38/src/opie_sync.c.orig	2008-11-10 16:33:42.000000000 +0100
-+++ libopensync-plugin-opie-0.38/src/opie_sync.c	2025-09-06 09:00:13.868506077 +0200
++++ libopensync-plugin-opie-0.38/src/opie_sync.c	2025-09-07 13:54:46.231364361 +0200
 @@ -25,7 +25,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE
  #include <opensync/opensync-data.h>
  #include <opensync/opensync-format.h>
@@ -887,7 +897,7 @@
  
  	OSyncError *error = NULL;
  
-@@ -275,7 +275,7 @@ static void connect(OSyncObjTypeSink *si
+@@ -277,7 +275,7 @@ static void connect(void *userdata, OSyn
  	g_mutex_unlock(env->plugin_env->plugin_mutex);
  	
  	/* pull the required data back */
@@ -932,7 +942,7 @@
  	}
  	
  	osync_context_report_success(ctx);
-@@ -318,15 +316,14 @@ error:
+@@ -318,18 +316,18 @@ error:
  	osync_error_unref(&error);
  }
  
@@ -945,13 +955,50 @@
 +	OpieSinkEnv *env = (OpieSinkEnv *)userdata;
  
  	OSyncError *error = NULL;
++	OSyncHashTable *hashtable = osync_objtype_sink_get_hashtable(sink);
  
 -	if (osync_objtype_sink_get_slowsync(sink)) {
 +	if (slow_sync) {
  		osync_trace(TRACE_INTERNAL, "Slow sync requested");
  
- 		if (!osync_hashtable_slowsync(env->hashtable, &error)) {
-@@ -444,11 +441,10 @@ static void get_changes(void *userdata,
+-		if (!osync_hashtable_slowsync(env->hashtable, &error)) {
++		if (!osync_hashtable_slowsync(hashtable, &error)) {
+ 			osync_trace(TRACE_EXIT_ERROR, "%s: %s", __func__, osync_error_print(&error));
+ 			osync_context_report_osyncerror(ctx, error);
+ 			return;
+@@ -358,11 +356,11 @@ static void get_changes(void *userdata,
+ 			g_free(hash);
+ 			
+ 			/* Detect and set the type of change */
+-			OSyncChangeType changetype = osync_hashtable_get_changetype(env->hashtable, change);
++			OSyncChangeType changetype = osync_hashtable_get_changetype(hashtable, change);
+ 			osync_change_set_changetype(change, changetype);
+ 			
+ 			/* Update the hashtable with the hash of the object */
+-			osync_hashtable_update_change(env->hashtable, change);
++			osync_hashtable_update_change(hashtable, change);
+ 	
+ 			if (changetype != OSYNC_CHANGE_TYPE_UNMODIFIED) {
+ 				/* Convert category IDs to names that other systems can use */
+@@ -405,7 +403,7 @@ static void get_changes(void *userdata,
+ 	}
+ 
+ 	/* Check for deleted entries using the hashtable */
+-	OSyncList *u, *uids = osync_hashtable_get_deleted(env->hashtable);
++	OSyncList *u, *uids = osync_hashtable_get_deleted(hashtable);
+ 	for (u = uids; u; u = u->next) {
+ 		const char *uid = u->data;
+ 		
+@@ -433,7 +431,7 @@ static void get_changes(void *userdata,
+ 
+ 		osync_context_report_change(ctx, change);
+ 
+-		osync_hashtable_update_change(env->hashtable, change);
++		osync_hashtable_update_change(hashtable, change);
+ 
+ 		osync_change_unref(change);
+ 	}
+@@ -444,11 +442,10 @@ static void get_changes(void *userdata,
  	osync_trace(TRACE_EXIT, "%s", __func__);
  }
  
@@ -965,7 +1012,16 @@
  
  	OSyncError *error = NULL;
  	const char *ext_uid = osync_change_get_uid(change);
-@@ -549,11 +545,10 @@ error:
+@@ -535,7 +532,7 @@ static void commit_change(void *userdata
+ 	if(change_doc)
+ 		xmlFreeDoc(change_doc);
+ 
+-	osync_hashtable_update_change(env->hashtable, change);
++	osync_hashtable_update_change(osync_objtype_sink_get_hashtable(sink), change);
+ 
+ 	//Answer the call
+ 	osync_context_report_success(ctx);
+@@ -549,11 +546,10 @@ error:
  	osync_error_unref(&error);
  }
  
@@ -979,7 +1035,7 @@
  	OSyncError *error = NULL;
  	
  	if ( !opie_put_sink(env) ) {
-@@ -565,16 +560,16 @@ static void sync_done(void *userdata, OS
+@@ -565,16 +561,16 @@ static void sync_done(void *userdata, OS
  	}
  	
  	if(env->objtype == OPIE_OBJECT_TYPE_NOTE) {
@@ -1002,7 +1058,7 @@
  	osync_context_report_success(ctx);
  	osync_trace(TRACE_EXIT, "%s", __func__);
  	return;
-@@ -585,15 +580,10 @@ error:
+@@ -585,15 +581,10 @@ error:
  	osync_error_unref(&error);
  }
  
@@ -1020,7 +1076,7 @@
  	//Answer the call
  	osync_context_report_success(ctx);
  }
-@@ -620,17 +610,13 @@ OpieSinkEnv *opie_sync_create_sink_env(O
+@@ -620,17 +611,13 @@ OpieSinkEnv *opie_sync_create_sink_env(O
  	sink_env->objformat = osync_format_env_find_objformat(formatenv, objformat);
  
  	/* Every sink can have different functions ... */
@@ -1045,7 +1101,7 @@
  	osync_plugin_info_add_objtype(info, sink);
  	
  	return sink_env;
-@@ -715,15 +701,15 @@ static void opie_sync_finalize( void* us
+@@ -715,15 +702,15 @@ static void opie_sync_finalize( void* us
  	osync_trace(TRACE_EXIT, "%s", __func__);
  }
  
@@ -1065,7 +1121,7 @@
  		g_assert(sink);
  
  		osync_objtype_sink_set_available(sink, TRUE);
-@@ -767,7 +753,7 @@ osync_bool get_sync_info(OSyncPluginEnv
+@@ -767,7 +754,7 @@ osync_bool get_sync_info(OSyncPluginEnv
  	osync_plugin_set_finalize(plugin, opie_sync_finalize);
  	osync_plugin_set_discover(plugin, opie_sync_discover);
  
