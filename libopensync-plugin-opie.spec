@@ -15,11 +15,11 @@ Patch0:		%{name}-libopensync0.39.patch
 BuildRequires:	cmake
 BuildRequires:	curl-devel
 BuildRequires:	glib2-devel >= 1:2.10
-BuildRequires:	libopensync-devel >= 0.39
+BuildRequires:	libopensync-devel >= 1:0.39
 BuildRequires:	libxml2-devel >= 2.0
 BuildRequires:	rpmbuild(macros) >= 1.605
 Requires:	glib2 >= 1:2.10
-Requires:	libopensync >= 0.39
+Requires:	libopensync >= 1:0.39
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
 %description
